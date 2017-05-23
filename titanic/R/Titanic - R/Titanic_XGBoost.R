@@ -11,7 +11,7 @@ test_data = read.csv("../../data/test.csv", stringsAsFactors = FALSE)
 all_data = bind_rows(train_data, test_data)
 all_data_clean <- all_data
 
-# Fill NA in Numeric Features with median (Imputing) -- could be done with caret?
+# Fill NA in Numeric Features with median (Imputing)
 all_data_clean$Age[is.na(all_data_clean$Age)] <- median(all_data_clean$Age, na.rm = TRUE)
 all_data_clean$Fare[is.na(all_data_clean$Fare)] <- median(all_data_clean$Fare, na.rm = TRUE)
 all_data_clean$Parch[is.na(all_data_clean$Parch)] <- median(all_data_clean$Parch, na.rm = TRUE)
@@ -36,27 +36,54 @@ enc = LabelEncoder.fit(all_data_clean$Ticket)
 all_data_clean$Ticket <- transform(enc, all_data_clean$Ticket)
 
 # Split back into Train and Test Datasets
-train_clean = all_data_clean[1:891,]
+train_val_clean = all_data_clean[1:891,]
 test_clean = all_data_clean[892:1309,]
 
-# Split Train and Test Datasets into X and y
+# Extract a Stratififed Validation Set from the Train Dataset
+set.seed(42)
+splitIndex <- createDataPartition(train_clean$Survived, p = .8, 
+                                  list = FALSE, 
+                                  times = 1)
+train_clean = train_val_clean[splitIndex,]
+val_clean = train_val_clean[-splitIndex,]
+
+# Split Train, Validation and Test Datasets into X and y
 X_train = as.data.frame(select(train_clean, -Survived))
 y_train = train_clean$Survived
+X_val = as.data.frame(select(val_clean, -Survived))
+y_val = val_clean$Survived
 X_test = as.data.frame(select(test_clean, -Survived))
 y_test = test_clean$Survived
 
-# ref: https://www.kaggle.com/ammara/titanic-competition-using-xgboost
-# Using the cross validation to estimate our error rate:
-param <- list("objective" = "binary:logistic")
-cv.nround <- 15
-cv.nfold <- 3
+# Train XGBoost Model
+model <- xgboost(data = data.matrix(X_train), label = data.matrix(y_train), max.depth = 3, eta = 1, nthread = 2, nround = 5, objective = "binary:logistic")
 
-# Train using Cross-Validation
-xgboost_cv = xgb.cv(param = param, data = data.matrix(X_train), label = data.matrix(y_train), nfold = cv.nfold, nrounds = cv.nround)
+# Predict on the Cross Validation Set
+pred_xgboost_val <- predict(fit_xgboost, data.matrix(X_val))
+y_val_pred <- as.numeric(pred_xgboost_val > 0.5)
 
-# Fitting with the xgboost model
-nround  = 15
-fit_xgboost <- xgboost(param = param, data = data.matrix(X_train), label = data.matrix(y_train), nrounds=nround)
+# Calculate Performance Metrics (https://www.r-bloggers.com/computing-classification-evaluation-metrics-in-r/)
+# Confustion Matrix
+cm = as.matrix(table(Actual = y_val, Predicted = y_val_pred)) # create the confusion matrix
+cm
+
+n = sum(cm) # number of instances
+nc = nrow(cm) # number of classes
+diag = diag(cm) # number of correctly classified instances per class 
+rowsums = apply(cm, 1, sum) # number of instances per class
+colsums = apply(cm, 2, sum) # number of predictions per class
+p = rowsums / n # distribution of instances over the actual classes
+q = colsums / n # distribution of instances over the predicted classes
+
+# Accuracy
+accuracy = sum(diag) / n 
+accuracy 
+
+# F1
+precision = diag / colsums 
+recall = diag / rowsums 
+f1 = 2 * precision * recall / (precision + recall) 
+data.frame(precision, recall, f1)
 
 # Compute feature importance matrix
 importance_matrix <- xgb.importance(colnames(X_train), model = fit_xgboost)
