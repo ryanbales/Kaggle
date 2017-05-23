@@ -23,13 +23,6 @@ preProcValues <- preProcess(all_data_clean[, -2], method = c("scale"))
 all_data_clean <- predict(preProcValues, all_data_clean)
 all_data_clean$PassengerId = as.integer(rownames(all_data_clean))
 
-# Mutate Categorical Features to Factors
-all_data_clean <- mutate(all_data_clean, Name = factor(Name))
-all_data_clean <- mutate(all_data_clean, Sex = factor(Sex))
-all_data_clean <- mutate(all_data_clean, Cabin = factor(Cabin))
-all_data_clean <- mutate(all_data_clean, Embarked = factor(Embarked))
-all_data_clean <- mutate(all_data_clean, Ticket = factor(Ticket))
-
 # Encode Categorical Features
 enc = LabelEncoder.fit(all_data_clean$Name)
 all_data_clean$Name <- transform(enc, all_data_clean$Name)
@@ -48,9 +41,9 @@ test_clean = all_data_clean[892:1309,]
 
 # Split Train and Test Datasets into X and y
 X_train = as.data.frame(select(train_clean, -Survived))
-y_train = as.data.frame(select(train_clean, Survived))
+y_train = train_clean$Survived
 X_test = as.data.frame(select(test_clean, -Survived))
-y_test = as.data.frame(select(test_clean, Survived))
+y_test = test_clean$Survived
 
 # ref: https://www.kaggle.com/ammara/titanic-competition-using-xgboost
 # Using the cross validation to estimate our error rate:
@@ -65,22 +58,15 @@ xgboost_cv = xgb.cv(param = param, data = data.matrix(X_train), label = data.mat
 nround  = 15
 fit_xgboost <- xgboost(param = param, data = data.matrix(X_train), label = data.matrix(y_train), nrounds=nround)
 
-# Get the feature real names
-names <- dimnames(X_train)[[2]]
-
 # Compute feature importance matrix
-importance_matrix <- xgb.importance(names, model = fit_xgboost)
+importance_matrix <- xgb.importance(colnames(X_train), model = fit_xgboost)
 
 # Plotting
 xgb.plot.importance(importance_matrix)
 
-# Predict on the Train Set and find the Best Cut-off
-pred_xgboost_train <- predict(fit_xgboost, data.matrix(X_train))
-proportion <- sapply(seq(.3,.7,.01),function(step) c(step,sum(ifelse(pred_xgboost_train<step,0,1)!=X_train)))
-
 # Prediction on Test DataSet
 pred_xgboost_test <- predict(fit_xgboost, data.matrix(X_test))
-y_test <- ifelse(pred_xgboost_test<proportion[,which.min(proportion[2,])][1],0,1)
+y_test <- as.numeric(pred_xgboost_test > 0.5)
 
 # Creating the submitting file
 submit <- data.frame(PassengerId = X_test$PassengerId, Survived = y_test)
